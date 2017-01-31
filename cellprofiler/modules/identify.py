@@ -813,8 +813,8 @@ class Identify(cellprofiler.module.Module):
             if wants_local_threshold:
                 return binary_image, None
             return binary_image
-        local_threshold, global_threshold = self.get_threshold(
-                image, mask, workspace)
+
+        threshold = self.get_threshold(image, mask, workspace)
 
         blurred_image = img
 
@@ -823,23 +823,14 @@ class Identify(cellprofiler.module.Module):
         if hasattr(workspace, "display_data"):
             workspace.display_data.threshold_sigma = sigma
 
-        binary_image = (blurred_image >= local_threshold) & mask
+        binary_image = (blurred_image >= threshold) & mask
         self.add_fg_bg_measurements(
                 workspace.measurements, img, mask, binary_image)
         if wants_local_threshold:
-            return binary_image, local_threshold
+            return binary_image, threshold
         return binary_image
 
     def get_threshold(self, image, mask, workspace):
-        '''Calculate a local and global threshold
-
-        img - base the threshold on this image's intensity
-
-        mask - use this mask to define the pixels of interest
-
-        workspace - get objects and measurements from this workspace and
-                    add threshold measurements to this workspace's measurements.
-        '''
         if self.threshold_scope == centrosome.threshold.TM_MANUAL:
             local_threshold = global_threshold = self.manual_threshold.value
         else:
@@ -912,7 +903,7 @@ class Identify(cellprofiler.module.Module):
             workspace.display_data.statistics.append(
                     ["Threshold", "%0.3g" % global_threshold])
 
-        return local_threshold, global_threshold
+        return local_threshold
 
     def get_measurement_objects_name(self):
         '''Return the name of the measurement objects
