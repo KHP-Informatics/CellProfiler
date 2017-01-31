@@ -188,86 +188,28 @@ class Thresholding(cellprofiler.module.ImageProcessing):
 
         if self.local.value:
             if self.local_operation.value == u"Adaptive":
-                if x.volumetric:
-                    y_data = numpy.zeros_like(x_data, dtype=numpy.bool)
-
-                    for index, data in enumerate(x_data):
-                        y_data[index] = skimage.filters.threshold_adaptive(
-                            image=data,
-                            block_size=self.block_size.value,
-                            method=self.adaptive_method.value.lower(),
-                            offset=self.offset.value,
-                            param=self.sigma.value
-                        )
-                else:
-                    y_data = skimage.filters.threshold_adaptive(
-                        image=x_data,
-                        block_size=self.block_size.value,
-                        method=self.adaptive_method.value.lower(),
-                        offset=self.offset.value,
-                        param=self.sigma.value
-                    )
+                y_data = adaptive(
+                    x_data,
+                    self.adaptive_method.value.lower(),
+                    self.block_size.value,
+                    self.offset.value,
+                    self.sigma.value
+                )
             elif self.local_operation.value == u"Otsu’s method":
-                disk = skimage.morphology.disk(self.radius.value)
-
-                if x.volumetric:
-                    y_data = numpy.zeros_like(x_data)
-
-                    for index, data in enumerate(x_data):
-                        y_data[index] = skimage.filters.rank.otsu(data, disk)
-                else:
-                    y_data = skimage.filters.rank.otsu(x_data, disk)
-
-                y_data = x_data >= y_data
+                y_data = local_otsu(x_data, self.radius.value)
             elif self.local_operation.value == u"Percentile":
-                disk = skimage.morphology.disk(self.radius.value)
-
-                if x.volumetric:
-                    y_data = numpy.zeros_like(x_data)
-
-                    for index, data in enumerate(x_data):
-                        y_data[index] = skimage.filters.rank.percentile(data, disk)
-                else:
-                    y_data = skimage.filters.rank.percentile(x_data, disk)
-
-                y_data = x_data >= y_data
+                y_data = percentile(x_data, self.radius.value)
         else:
             if self.global_operation.value == u"Iterative selection thresholding":
-                y_data = skimage.filters.threshold_isodata(
-                    image=x_data,
-                    nbins=self.bins.value
-                )
-
-                y_data = x_data >= y_data
+                y_data = iterative_selection(x_data, self.bins.value)
             elif self.global_operation.value == u"Manual":
-                x_data = skimage.img_as_float(x_data)
-
-                x_data = skimage.exposure.rescale_intensity(x_data)
-
-                y_data = numpy.zeros_like(x_data, numpy.bool)
-
-                y_data[x_data > self.minimum.value] = True
-                y_data[x_data < self.maximum.value] = False
+                y_data = manual(x_data, self.minimum.value, self.maximum.value)
             elif self.global_operation.value == u"Minimum cross entropy thresholding":
-                y_data = skimage.filters.threshold_li(
-                    image=x_data
-                )
-
-                y_data = x_data >= y_data
+                y_data = minimum_cross_entropy(x_data)
             elif self.global_operation.value == u"Otsu’s method":
-                y_data = skimage.filters.threshold_otsu(
-                    image=x_data,
-                    nbins=self.bins.value
-                )
-
-                y_data = x_data >= y_data
+                y_data = otsu(x_data, self.bins.value)
             elif self.global_operation.value == u"Yen’s method":
-                y_data = skimage.filters.threshold_yen(
-                    image=x_data,
-                    nbins=self.bins.value
-                )
-
-                y_data = x_data >= y_data
+                y_data = yen(x_data, self.bins.value)
 
         y = cellprofiler.image.Image(
             image=y_data,
@@ -283,3 +225,93 @@ class Thresholding(cellprofiler.module.ImageProcessing):
             workspace.display_data.y_data = y_data
 
             workspace.display_data.dimensions = x.dimensions
+
+
+def adaptive(data, method, block_size, offset, sigma=None):
+    if data.ndim == 3:
+        y_data = numpy.zeros_like(data, dtype=numpy.bool)
+
+        for index, plane in enumerate(data):
+            y_data[index] = skimage.filters.threshold_adaptive(
+                image=plane,
+                block_size=block_size,
+                method=method,
+                offset=offset,
+                param=sigma
+            )
+
+        return y_data
+
+    return skimage.filters.threshold_adaptive(
+        image=data,
+        block_size=block_size,
+        method=method,
+        offset=offset,
+        param=sigma
+    )
+
+
+def iterative_selection(data, nbins):
+    y_data = skimage.filters.threshold_isodata(image=data, nbins=nbins)
+
+    return data >= y_data
+
+
+def local_otsu(data, radius):
+    disk = skimage.morphology.disk(radius)
+
+    if data.ndim == 3:
+        y_data = numpy.zeros_like(data)
+
+        for index, plane in enumerate(data):
+            y_data[index] = skimage.filters.rank.otsu(plane, disk)
+    else:
+        y_data = skimage.filters.rank.otsu(data, disk)
+
+    return data >= y_data
+
+
+def manual(data, minimum, maximum):
+    data = skimage.img_as_float(data)
+
+    data = skimage.exposure.rescale_intensity(data)
+
+    y_data = numpy.zeros_like(data, numpy.bool)
+
+    y_data[data > minimum] = True
+
+    y_data[data < maximum] = False
+
+    return y_data
+
+
+def minimum_cross_entropy(data):
+    y_data = skimage.filters.threshold_li(image=data)
+
+    return data >= y_data
+
+
+def otsu(data, nbins):
+    y_data = skimage.filters.threshold_otsu(image=data, nbins=nbins)
+
+    return data >= y_data
+
+
+def percentile(data, radius):
+    disk = skimage.morphology.disk(radius)
+
+    if data.ndim == 3:
+        y_data = numpy.zeros_like(data)
+
+        for index, data in enumerate(data):
+            y_data[index] = skimage.filters.rank.percentile(data, disk)
+    else:
+        y_data = skimage.filters.rank.percentile(data, disk)
+
+    return data >= y_data
+
+
+def yen(data, nbins):
+    y_data = skimage.filters.threshold_yen(image=data, nbins=nbins)
+
+    return data >= y_data
