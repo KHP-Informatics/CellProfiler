@@ -107,8 +107,8 @@ OFFSET_DIRECTORY_PATH = 11
 OFFSET_BIT_DEPTH_V11 = 12
 
 
-class SaveImages(cpm.Module):
-    module_name = "SaveImages"
+class TestSaveImages(cpm.Module):
+    module_name = "TestSaveImages"
     variable_revision_number = 11
     category = "File Processing"
 
@@ -557,11 +557,30 @@ class SaveImages(cpm.Module):
     def save_objects(self, workspace):
         objects_name = self.objects_name.value
         objects = workspace.object_set.get_objects(objects_name)
+
+        # WORK IN PROGRESS
+        self.image_name.value = "DNA"
+        orig_image = workspace.image_set.get_image(self.image_name.value)
+
         filename = self.get_filename(workspace)
         if filename is None:  # failed overwrite check
             return
 
+        pathname = self.pathname.get_absolute_path()
+
         labels = [l for l, c in objects.get_labels()]
+        objects_to_save = labels[0]
+        print objects_to_save
+
+        # TODO: Make sure that the object count is greater than 0
+        for o in range(1, np.max(objects_to_save)+1):
+            image_to_save = np.copy(orig_image.get_image())
+            top, bot, left, right = self.find_bounds(objects_to_save == o)
+
+            image_to_save = image_to_save[top:bot+1, left:right+1]
+            self.save_image_pixels(image_to_save, "%s/Object_Test_%d.tif" % (pathname, o))
+        # WORK IN PROGRESS
+
         if self.get_file_format() == FF_MAT:
             pixels = objects.segmented
             scipy.io.matlab.mio.savemat(filename, {"Image": pixels}, format='5')
@@ -596,6 +615,11 @@ class SaveImages(cpm.Module):
         self.save_filename_measurements(workspace)
         if self.show_window:
             workspace.display_data.wrote_image = True
+
+    def find_bounds(self, array):
+        top, bot = np.where(np.max(array, 1) == 1)[0][[0, -1]]
+        left, right = np.where(np.max(array, 0) == 1)[0][[0, -1]]
+        return top, bot, left, right
 
     def post_group(self, workspace, *args):
         if (self.when_to_save == WS_LAST_CYCLE and
@@ -637,6 +661,57 @@ class SaveImages(cpm.Module):
                     c=c, z=z, t=t,
                     size_c=size_c, size_z=size_z, size_t=size_t,
                     channel_names=channel_names)
+
+    def save_image_pixels(self, pixels, filename):
+        '''
+        This function is just a hack to save an image given a bitmap and must be changed to make more sense.
+        '''
+        u16hack = (self.get_bit_depth_beta() == BIT_DEPTH_16 and
+                   pixels.dtype.kind in ('u', 'i'))
+
+        if not (u16hack or self.get_bit_depth_beta() == BIT_DEPTH_FLOAT):
+            # Clip at 0 and 1
+            if np.max(pixels) > 1 or np.min(pixels) < 0:
+                sys.stderr.write(
+                    "Warning, clipping image %s before output. Some intensities are outside of range 0-1" %
+                    self.image_name.value)
+                pixels = pixels.copy()
+                pixels[pixels < 0] = 0
+                pixels[pixels > 1] = 1
+
+
+        if pixels.ndim == 2 and self.colormap != CM_GRAY and \
+                        self.get_bit_depth_beta() == BIT_DEPTH_8 and False:
+            # Convert grayscale image to rgb for writing
+            if self.colormap == cps.DEFAULT:
+                colormap = cpp.get_default_colormap()
+            else:
+                colormap = self.colormap.value
+            cm = matplotlib.cm.get_cmap(colormap)
+
+            mapper = matplotlib.cm.ScalarMappable(cmap=cm)
+            pixels = mapper.to_rgba(pixels, bytes=True)
+            pixel_type = ome.PT_UINT8
+        elif self.get_bit_depth_beta() == BIT_DEPTH_8:
+            pixels = (pixels * 255).astype(np.uint8)
+            pixel_type = ome.PT_UINT8
+        elif self.get_bit_depth_beta() == BIT_DEPTH_FLOAT:
+            pixel_type = ome.PT_FLOAT
+        else:
+            if not u16hack:
+                pixels = (pixels * 65535)
+            pixel_type = ome.PT_UINT16
+
+        # filename = self.get_filename(workspace)
+        if filename is None:  # failed overwrite check
+            return
+
+        if self.get_file_format() == FF_MAT:
+            scipy.io.matlab.mio.savemat(filename, {"Image": pixels}, format='5')
+        elif self.get_file_format() == FF_BMP:
+            save_bmp(filename, pixels)
+        else:
+            self.do_save_image(None, filename, pixels, pixel_type)
 
     def save_image(self, workspace):
         if self.show_window:
@@ -881,6 +956,13 @@ class SaveImages(cpm.Module):
             return self.bit_depth.value
         else:
             return BIT_DEPTH_8
+
+    def get_bit_depth_beta(self):
+        """
+        to bypass other format checks.
+        This should be changed as well
+        """
+        return BIT_DEPTH_8
 
     def upgrade_settings(self, setting_values, variable_revision_number,
                          module_name, from_matlab):
